@@ -68,14 +68,13 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
     }
   })
 
-  // List Collections with Relevance Score - FIXED VERSION
-  // List Collections with Relevance Score - COMPLETELY FIXED VERSION WITH PROPER TYPES
+// List Collections with Relevance Score 
 .get('/', async (c) => {
   const userId = c.get('userId');
 
   try {
-    // First get collections with basic info and item count
-    const collectionsWithCounts = await db
+    // Single optimized query with database-level relevance calculation
+    const collectionsWithScores = await db
       .select({
         id: collections.id,
         name: collections.name,
@@ -84,62 +83,27 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
         createdAt: collections.createdAt,
         updatedAt: collections.updatedAt,
         itemCount: count(collectionItems.id),
+        relevanceScore: sql<number>`
+          COALESCE(
+            SUM(
+              CASE 
+                WHEN ${collectionItems.note} IS NOT NULL AND TRIM(${collectionItems.note}) != '' THEN 2 
+                ELSE 1 
+              END
+            ), 0
+          )
+        `,
       })
       .from(collections)
       .leftJoin(collectionItems, eq(collections.id, collectionItems.collectionId))
       .where(eq(collections.userId, userId))
       .groupBy(collections.id)
-      .orderBy(desc(collections.createdAt));
-
-    // If no collections found, return empty array
-    if (collectionsWithCounts.length === 0) {
-      return c.json(successResponse([]));
-    }
-
-    // Get all items for these collections to calculate relevance scores
-    const collectionIds = collectionsWithCounts.map((col: any) => col.id);
-    
-    // FIXED: Use proper Drizzle ORM syntax for IN clause
-    const allItems = await db
-      .select()
-      .from(collectionItems)
-      .where(inArray(collectionItems.collectionId, collectionIds));
-
-    // Group items by collectionId
-    const itemsByCollection = allItems.reduce((acc: Record<number, typeof allItems>, item: any) => {
-      if (!acc[item.collectionId]) {
-        acc[item.collectionId] = [];
-      }
-      acc[item.collectionId].push(item);
-      return acc;
-    }, {});
-
-    // Calculate relevance scores and prepare final response
-    const collectionsWithScores = collectionsWithCounts.map((collection: any) => {
-      const items = itemsByCollection[collection.id] || [];
-      const relevanceScore = items.reduce((score: number, item: any) => {
-        return score + (item.note && item.note.trim() !== '' ? 2 : 1);
-      }, 0);
-
-      return {
-        ...collection,
-        relevanceScore,
-      };
-    });
-
-    // Sort by relevance score (highest first), then by creation date
-    collectionsWithScores.sort((a: any, b: any) => {
-      if (b.relevanceScore !== a.relevanceScore) {
-        return b.relevanceScore - a.relevanceScore;
-      }
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+      .orderBy(sql`relevanceScore DESC`, desc(collections.updatedAt));
 
     return c.json(successResponse(collectionsWithScores));
 
   } catch (error: any) {
     console.error('Error listing collections:', error);
-    console.error('Error details:', error.message);
     return c.json(errorResponse('Failed to fetch collections'), 500);
   }
 })
@@ -307,68 +271,57 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
 
   try {
     const moveResult = await db.transaction(async (tx: any) => {
-      console.log(`🔍 Moving item: ${itemId} from ${sourceCollectionId} to ${targetCollectionId}`);
+      console.log(`Starting atomic move for item: ${itemId}`);
 
-      // Verify both collections exist and belong to user
-      const [sourceCollection, targetCollection] = await Promise.all([
-        tx
-          .select()
-          .from(collections)
-          .where(and(
-            eq(collections.userId, userId),
-            eq(collections.id, sourceCollectionId)
-          ))
-          .then((results: any[]) => results[0]),
-        tx
-          .select()
-          .from(collections)
-          .where(and(
-            eq(collections.userId, userId),
-            eq(collections.id, targetCollectionId)
-          ))
-          .then((results: any[]) => results[0])
-      ]);
+      // Use FOR UPDATE to lock both collections and prevent race conditions
+      const collectionsResult = await tx
+        .select()
+        .from(collections)
+        .where(and(
+          eq(collections.userId, userId),
+          inArray(collections.id, [sourceCollectionId, targetCollectionId])
+        ))
+        .for('update');
 
-      console.log(`📁 Source collection:`, sourceCollection);
-      console.log(`📁 Target collection:`, targetCollection);
+      const sourceCollection = collectionsResult.find((c: any) => c.id === sourceCollectionId);
+      const targetCollection = collectionsResult.find((c: any) => c.id === targetCollectionId);
 
       if (!sourceCollection) {
-        throw new Error(`Source collection ${sourceCollectionId} not found or doesn't belong to user`);
+        throw new Error(`Source collection ${sourceCollectionId} not found or access denied`);
       }
 
       if (!targetCollection) {
-        throw new Error(`Target collection ${targetCollectionId} not found or doesn't belong to user`);
+        throw new Error(`Target collection ${targetCollectionId} not found or access denied`);
       }
 
-      // Check if item exists in source collection
-      const sourceItems = await tx
+      // Get item from source collection with lock
+      const [itemToMove] = await tx
         .select()
         .from(collectionItems)
         .where(and(
           eq(collectionItems.collectionId, sourceCollectionId),
           eq(collectionItems.itemId, itemId)
-        ));
-
-      console.log(`🔍 Found ${sourceItems.length} items in source collection matching criteria`);
-      console.log(`🔍 Looking for itemId: "${itemId}" in collection: ${sourceCollectionId}`);
-
-      const itemToMove = sourceItems[0];
+        ))
+        .for('update');
 
       if (!itemToMove) {
-        // Let's check what items actually exist in the source collection for debugging
-        const allSourceItems = await tx
-          .select()
-          .from(collectionItems)
-          .where(eq(collectionItems.collectionId, sourceCollectionId));
-        
-        console.log(`📋 All items in source collection ${sourceCollectionId}:`, allSourceItems);
-        throw new Error(`Item "${itemId}" not found in source collection ${sourceCollectionId}. Available items: ${allSourceItems.map((item: any) => item.itemId).join(', ')}`);
+        throw new Error(`Item "${itemId}" not found in source collection`);
       }
 
-      console.log(`✅ Found item to move:`, itemToMove);
+      // Check target collection capacity with current lock
+      const [targetCountResult] = await tx
+        .select({ count: count() })
+        .from(collectionItems)
+        .where(eq(collectionItems.collectionId, targetCollectionId));
 
-      // Check if item already exists in target collection
-      const targetItems = await tx
+      const targetCount = targetCountResult?.count ?? 0;
+
+      if (targetCount >= 5) {
+        throw new Error(`Target collection "${targetCollection.name}" is full (${targetCount}/5 items)`);
+      }
+
+      // Check if item already exists in target (shouldn't happen with locks, but safe)
+      const [existingInTarget] = await tx
         .select()
         .from(collectionItems)
         .where(and(
@@ -376,29 +329,14 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
           eq(collectionItems.itemId, itemId)
         ));
 
-      if (targetItems.length > 0) {
-        throw new Error(`Item "${itemId}" already exists in target collection ${targetCollectionId}`);
+      if (existingInTarget) {
+        throw new Error(`Item already exists in target collection`);
       }
 
-      // Check target collection capacity
-      const targetCountResult = await tx
-        .select({ count: count() })
-        .from(collectionItems)
-        .where(eq(collectionItems.collectionId, targetCollectionId));
-
-      const targetCount = targetCountResult[0]?.count ?? 0;
-
-      console.log(`📊 Target collection ${targetCollectionId} currently has ${targetCount} items`);
-
-      if (targetCount >= 5) {
-        throw new Error(`Target collection ${targetCollectionId} is full (${targetCount}/5 items)`);
-      }
-
-      // Perform the move - DELETE from source and INSERT into target (more reliable than UPDATE)
-      console.log(`🔄 Moving item by deleting from source and inserting into target...`);
+      // ATOMIC OPERATION: Delete from source and insert into target
+      console.log(`Moving item from collection ${sourceCollectionId} to ${targetCollectionId}`);
       
-      // First delete from source
-      const deleteResult = await tx
+      const [deletedItem] = await tx
         .delete(collectionItems)
         .where(and(
           eq(collectionItems.collectionId, sourceCollectionId),
@@ -406,26 +344,21 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
         ))
         .returning();
 
-      console.log(`🗑️ Deleted from source:`, deleteResult);
-
-      if (deleteResult.length === 0) {
-        throw new Error('Failed to delete item from source collection');
+      if (!deletedItem) {
+        throw new Error('Failed to remove item from source collection');
       }
 
-      // Then insert into target with the same data but new collectionId
       const [movedItem] = await tx
         .insert(collectionItems)
         .values({
           collectionId: targetCollectionId,
           itemId: itemToMove.itemId,
           note: itemToMove.note,
-          createdAt: new Date() // Reset creation date
+          createdAt: new Date()
         })
         .returning();
 
-      console.log(`✅ Inserted into target:`, movedItem);
-
-      // Update both collections' updatedAt
+      // Update both collections' timestamps
       await Promise.all([
         tx.update(collections)
           .set({ updatedAt: new Date() })
@@ -435,22 +368,28 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
           .where(eq(collections.id, targetCollectionId))
       ]);
 
-      console.log(`📅 Updated collection timestamps`);
+      console.log(`Item moved successfully`);
 
-      return { 
-        success: true, 
-        message: `Item "${itemId}" moved successfully from collection "${sourceCollection.name}" to "${targetCollection.name}"`,
-        movedItem 
+      return {
+        success: true,
+        message: `Item "${itemId}" moved successfully from "${sourceCollection.name}" to "${targetCollection.name}"`,
+        movedItem
       };
     });
 
     return c.json(successResponse(moveResult));
 
   } catch (error: any) {
-    console.error('❌ Error moving item:', error);
+    console.error('Error in atomic move:', error);
+    
+    // Handle database constraint violations
+    if (error.code === 'P0001' && error.message.includes('cannot have more than 5 items')) {
+      return c.json(errorResponse('Target collection is full'), 400);
+    }
     
     const errorMessage = error instanceof Error ? error.message : 'Failed to move item';
-    return c.json(errorResponse(errorMessage), 400);
+    const status = errorMessage.includes('not found') || errorMessage.includes('full') || errorMessage.includes('already exists') ? 400 : 500;
+    return c.json(errorResponse(errorMessage), status);
   }
 })
 

@@ -29,6 +29,10 @@ app.onError((err, c) => {
   return c.json({ error: 'Internal server error' }, 500);
 });
 
+// Export the app instance for testing
+export { app };
+
+// Default export for Bun server
 export default {
   port: 3000,
   fetch: app.fetch,
