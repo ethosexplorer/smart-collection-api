@@ -27,12 +27,53 @@ bun install
 # Create database
 createdb postgres
 
-# Or via psql
+## Or via psql
 psql -U postgres -c "CREATE DATABASE \"postgres\";"
+
+## create tables manually:
+CREATE TABLE users (
+    id TEXT PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE TABLE collections (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    user_id TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE TABLE collection_items (
+    id SERIAL PRIMARY KEY,
+    collection_id INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    note TEXT,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+# Create unique constraints
+CREATE UNIQUE INDEX user_collection_name_idx ON collections(user_id, name);
+CREATE UNIQUE INDEX collection_item_unique_idx ON collection_items(collection_id, item_id);
+
+# Create 5-item limit constraint
+CREATE OR REPLACE FUNCTION check_collection_item_limit()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (SELECT COUNT(*) FROM collection_items WHERE collection_id = NEW.collection_id) >= 5 THEN
+        RAISE EXCEPTION 'Collection cannot have more than 5 items';
+    END IF;
+    RETURN NEW;
+END;
+
+CREATE TRIGGER enforce_collection_item_limit
+    BEFORE INSERT ON collection_items
+    FOR EACH ROW
+    EXECUTE FUNCTION check_collection_item_limit();
 
 
 ### 3. Environment Configuration
-
 Create a `.env` file:
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
 
@@ -55,12 +96,6 @@ The API will be available at `http://localhost:3000`
 ## Testing
 ### Run All Tests
 bun test
-
-### Test Database Connection
-bun run test:connection
-
-### Run Specific Test Files
-bun test tests/collections.test.ts
 
 ## API Endpoints
 ### Collections
