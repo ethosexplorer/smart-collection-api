@@ -73,7 +73,6 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
   const userId = c.get('userId');
 
   try {
-    // Single optimized query with database-level relevance calculation
     const collectionsWithScores = await db
       .select({
         id: collections.id,
@@ -97,10 +96,17 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
       .from(collections)
       .leftJoin(collectionItems, eq(collections.id, collectionItems.collectionId))
       .where(eq(collections.userId, userId))
-      .groupBy(collections.id)
-      .orderBy(sql`relevanceScore DESC`, desc(collections.updatedAt));
+      .groupBy(collections.id);
 
-    return c.json(successResponse(collectionsWithScores));
+    // Sort in JavaScript by relevanceScore (descending) and then by updatedAt (descending)
+    const sortedCollections = collectionsWithScores.sort((a:any, b:any) => {
+      if (b.relevanceScore !== a.relevanceScore) {
+        return b.relevanceScore - a.relevanceScore;
+      }
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
+
+    return c.json(successResponse(sortedCollections));
 
   } catch (error: any) {
     console.error('Error listing collections:', error);
@@ -369,7 +375,7 @@ export const collectionsRoutes = new Hono<{ Variables: Variables }>()
       ]);
 
       console.log(`Item moved successfully`);
-
+      
       return {
         success: true,
         message: `Item "${itemId}" moved successfully from "${sourceCollection.name}" to "${targetCollection.name}"`,

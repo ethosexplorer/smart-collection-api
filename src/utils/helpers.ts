@@ -6,22 +6,28 @@ export async function generateUniqueCollectionName(userId: string, baseName: str
   let counter = 0;
   let candidateName = baseName;
   
-  while (counter < 100) { // Safety limit
-    const existing = await db
-      .select()
-      .from(collections)
-      .where(and(
-        eq(collections.userId, userId),
-        eq(collections.name, candidateName)
-      ))
-      .limit(1);
+  while (counter < 100) {
+    try {
+      const existing = await db
+        .select()
+        .from(collections)
+        .where(and(
+          eq(collections.userId, userId),
+          eq(collections.name, candidateName)
+        ))
+        .limit(1);
 
-    if (existing.length === 0) {
+      if (existing.length === 0) {
+        return candidateName;
+      }
+
+      counter++;
+      candidateName = `${baseName} (${counter})`;
+    } catch (error) {
+      // If there's any error, just return the current candidate name
+      console.log('Name generation note:', error);
       return candidateName;
     }
-
-    counter++;
-    candidateName = `${baseName} (${counter})`;
   }
 
   throw new Error('Could not generate unique collection name');

@@ -1,4 +1,3 @@
-// src/db/index.ts - COMPLETE VERSION WITH CONSTRAINTS
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema';
@@ -8,10 +7,13 @@ console.log('Starting Smart Collections API...');
 let db: any = null;
 let isConnected = false;
 
-async function initializeDatabaseConstraints(client: any) {
+// Function to setup database constraints
+async function setupDatabaseConstraints(sql: any) {
   try {
-    // Apply the constraint trigger
-    await client`
+    console.log('Setting up database constraints...');
+    
+    // Execute each SQL command separately
+    await sql`
       CREATE OR REPLACE FUNCTION check_collection_item_limit()
       RETURNS TRIGGER AS $$
       BEGIN
@@ -22,115 +24,73 @@ async function initializeDatabaseConstraints(client: any) {
       END;
       $$ LANGUAGE plpgsql;
     `;
-    
-    await client`
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    await sql`
       DROP TRIGGER IF EXISTS enforce_collection_item_limit ON collection_items;
+    `;
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    await sql`
       CREATE TRIGGER enforce_collection_item_limit
           BEFORE INSERT ON collection_items
           FOR EACH ROW
           EXECUTE FUNCTION check_collection_item_limit();
     `;
-    
-    console.log('Database constraints applied successfully');
-  } catch (error: any) {
-    console.log('Could not apply database constraints:', error.message);
+
+    console.log('✅ Database constraints setup completed');
+  } catch (error) {
+    console.error('❌ Failed to setup database constraints:', error);
+    throw error;
   }
 }
 
-async function initializeDatabase() {
+// Initialize real database connection with constraints
+async function initializeRealDatabase() {
   try {
-    console.log('Attempting to connect to local PostgreSQL...');
+    // Use test database for tests, regular database for development
+    const databaseName = process.env.NODE_ENV === 'test' ? 'smart-collections-test' : 'smart-collections';
+    const connectionString = process.env.DATABASE_URL || `postgresql://postgres:@localhost:5432/${databaseName}`;
     
-    const connectionString = process.env.DATABASE_URL || "postgresql://postgres:@localhost:5432/smart-collection-api";
+    const sql = postgres(connectionString);
     
-    console.log('Using connection string:', connectionString.replace(/:[^:]*@/, ':***@'));
-
-    const client = postgres(connectionString, {
-      ssl: false,
-      connect_timeout: 10,
-      idle_timeout: 20,
-      max: 10,
-    });
-
     // Test connection
-    await client`SELECT 1 as connection_test`;
+    const result = await sql`SELECT version()`;
+    console.log('✅ Database connected:', result[0].version);
     
-    // Apply database constraints
-    await initializeDatabaseConstraints(client);
+    // Setup constraints
+    await setupDatabaseConstraints(sql);
     
-    db = drizzle(client, { schema });
+    // Initialize Drizzle with the schema
+    const drizzleDb = drizzle(sql, { schema });
     isConnected = true;
-    console.log('Local PostgreSQL connected successfully!');
     
-  } catch (error: any) {
-    console.log('Database connection failed:', error.message);
-    console.log('Using mock database for development');
-    
-    // Use mock database
-    db = createMockDatabase();
-    isConnected = false;
+    console.log('✅ Real database initialized with constraints');
+    return { db: drizzleDb, sql };
+  } catch (error) {
+    console.error('❌ Real database connection failed:', error);
+    throw error; // Don't fall back to mock - fail fast
   }
-}
-
-function createMockDatabase() {
-  console.log('Initializing enhanced mock database...');
-  let itemCounts = new Map();
-  
-  return {
-    insert: (table: any) => ({
-      values: (data: any) => ({
-        onConflictDoNothing: () => ({
-          returning: () => [{
-            ...data,
-            id: data.id || Math.floor(Math.random() * 1000) + 1,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          }]
-        }),
-        returning: () => {
-          // Mock the 5-item limit for collections
-          if (table._?.name === 'collectionItems') {
-            const collectionId = data.collectionId;
-            const currentCount = itemCounts.get(collectionId) || 0;
-            if (currentCount >= 5) {
-              throw new Error('Collection cannot have more than 5 items');
-            }
-            itemCounts.set(collectionId, currentCount + 1);
-          }
-          
-          return [{
-            ...data,
-            id: data.id || Math.floor(Math.random() * 1000) + 1,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          }];
-        }
-      })
-    }),
-    // Add other mock methods as needed
-    select: () => ({
-      from: () => ({
-        where: () => ({
-          groupBy: () => [],
-          orderBy: () => []
-        })
-      })
-    }),
-    transaction: (fn: any) => fn({
-      // Mock transaction methods
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            for: () => [{}]
-          })
-        })
-      })
-    })
-  };
 }
 
 // Initialize database
-initializeDatabase();
+async function initializeDatabase() {
+  // ALWAYS use real database - no mock fallback
+  return await initializeRealDatabase();
+}
+
+// Initialize database immediately (using top-level await)
+try {
+  const database = await initializeDatabase();
+  db = database.db;
+  isConnected = true;
+  console.log(`Database initialized successfully (real PostgreSQL with constraints)`);
+} catch (error) {
+  console.error('❌ Failed to initialize database:', error);
+  process.exit(1); // Exit if database connection fails
+}
 
 export { db, isConnected };
 export type Database = typeof db;

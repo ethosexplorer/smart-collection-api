@@ -1,6 +1,14 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { collectionsRoutes } from './routes/collections';
+import { runMigrations } from './db/migrate';
+
+// Run migrations on startup (in production)
+// if (process.env.NODE_ENV === 'production') {
+//   runMigrations().catch(console.error);
+// }
+
+// await runMigrations();
 
 const app = new Hono();
 

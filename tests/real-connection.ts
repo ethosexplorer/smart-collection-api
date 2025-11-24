@@ -1,4 +1,3 @@
-// scripts/test-connection.ts
 import postgres from 'postgres';
 
 async function testAllConnectionMethods() {
