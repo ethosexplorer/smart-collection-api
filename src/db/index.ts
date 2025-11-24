@@ -40,9 +40,9 @@ async function setupDatabaseConstraints(sql: any) {
           EXECUTE FUNCTION check_collection_item_limit();
     `;
 
-    console.log('✅ Database constraints setup completed');
+    console.log('Database constraints setup completed');
   } catch (error) {
-    console.error('❌ Failed to setup database constraints:', error);
+    console.error('Failed to setup database constraints:', error);
     throw error;
   }
 }
@@ -58,7 +58,7 @@ async function initializeRealDatabase() {
     
     // Test connection
     const result = await sql`SELECT version()`;
-    console.log('✅ Database connected:', result[0].version);
+    console.log('Database connected:', result[0].version);
     
     // Setup constraints
     await setupDatabaseConstraints(sql);
@@ -67,10 +67,10 @@ async function initializeRealDatabase() {
     const drizzleDb = drizzle(sql, { schema });
     isConnected = true;
     
-    console.log('✅ Real database initialized with constraints');
+    console.log('Real database initialized with constraints');
     return { db: drizzleDb, sql };
   } catch (error) {
-    console.error('❌ Real database connection failed:', error);
+    console.error('Real database connection failed:', error);
     throw error; // Don't fall back to mock - fail fast
   }
 }
@@ -88,7 +88,7 @@ try {
   isConnected = true;
   console.log(`Database initialized successfully (real PostgreSQL with constraints)`);
 } catch (error) {
-  console.error('❌ Failed to initialize database:', error);
+  console.error('Failed to initialize database:', error);
   process.exit(1); // Exit if database connection fails
 }
 

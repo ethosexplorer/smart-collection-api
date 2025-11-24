@@ -1,4 +1,3 @@
-// src/models/types.ts
 import { z } from 'zod';
 
 export const CreateCollectionSchema = z.object({

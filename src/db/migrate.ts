@@ -1,4 +1,3 @@
-// src/db/migrate.ts
 import postgres from 'postgres';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -8,18 +7,18 @@ export async function runMigrations() {
     const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:@localhost:5432/postgres';
     const sql = postgres(connectionString);
 
-    console.log('🚀 Running database migrations...');
+    console.log('Running database migrations...');
 
     // Look for constraints.sql in the same directory as this file (src/db/)
     const constraintsPath = join(__dirname, 'constraints.sql');
     
     if (!existsSync(constraintsPath)) {
-      console.log('⚠️ constraints.sql not found in src/db/, trying project root...');
+      console.log('constraints.sql not found in src/db/, trying project root...');
       
       // Fallback to project root
       const rootConstraintsPath = join(process.cwd(), 'constraints.sql');
       if (!existsSync(rootConstraintsPath)) {
-        console.log('⚠️ constraints.sql not found anywhere, creating database constraints directly...');
+        console.log('constraints.sql not found anywhere, creating database constraints directly...');
         await createConstraintsDirectly(sql);
       } else {
         const constraintsSQL = readFileSync(rootConstraintsPath, 'utf-8');
@@ -31,10 +30,10 @@ export async function runMigrations() {
       await sql.unsafe(constraintsSQL);
     }
 
-    console.log('✅ Database migrations completed successfully');
+    console.log('Database migrations completed successfully');
     await sql.end();
   } catch (error) {
-    console.error('❌ Database migrations failed:', error);
+    console.error('Database migrations failed:', error);
     throw error;
   }
 }

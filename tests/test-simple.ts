@@ -1,4 +1,3 @@
-// tests/test-simple.ts
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { testApp } from './setup';
 
@@ -183,5 +182,5 @@ describe('Simple Collections API Tests', () => {
     expect(error.error).toContain('full');
   });
 
-  console.log('✅ All simple tests completed successfully!');
+  console.log('All simple tests completed successfully!');
 });

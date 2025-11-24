@@ -1,7 +1,7 @@
 import postgres from 'postgres';
 
 async function testAllConnectionMethods() {
-  console.log('🧪 Testing local PostgreSQL connection methods...\n');
+  console.log('Testing local PostgreSQL connection methods...\n');
 
   const methods = [
     {
@@ -30,11 +30,11 @@ async function testAllConnectionMethods() {
   ];
 
   for (const method of methods) {
-    console.log(`🔧 Testing: ${method.name}`);
+    console.log(`Testing: ${method.name}`);
     
     // Skip if environment variable is not set
     if (method.name === 'Environment Variable' && !method.config) {
-      console.log('   ⚠️  SKIPPED: DATABASE_URL not set in environment');
+      console.log('SKIPPED: DATABASE_URL not set in environment');
       console.log('---');
       continue;
     }
@@ -45,7 +45,7 @@ async function testAllConnectionMethods() {
         : postgres(method.config);
       
       const result = await sql`SELECT version() as version, current_database() as db, current_timestamp as time`;
-      console.log('✅ SUCCESS:');
+      console.log('SUCCESS:');
       console.log('   Database:', result[0].db);
       console.log('   Version:', result[0].version);
       console.log('   Time:', result[0].time);
@@ -61,27 +61,27 @@ async function testAllConnectionMethods() {
       
       await sql.end();
     } catch (error: any) {
-      console.log('❌ FAILED:', error.message);
+      console.log('FAILED:', error.message);
       
       // Provide specific troubleshooting tips for local PostgreSQL
       if (error.message.includes('connection refused') || error.message.includes('ECONNREFUSED')) {
-        console.log('   💡 Check: Is PostgreSQL service running?');
-        console.log('   💡 Windows: net start postgresql');
-        console.log('   💡 Mac: brew services start postgresql');
+        console.log('   Check: Is PostgreSQL service running?');
+        console.log('   Windows: net start postgresql');
+        console.log('   Mac: brew services start postgresql');
       }
       
       if (error.message.includes('database') && error.message.includes('does not exist')) {
-        console.log('   💡 Check: Database "smart-collection-api" exists?');
-        console.log('   💡 Run: createdb smart-collection-api');
+        console.log('   Check: Database "smart-collection-api" exists?');
+        console.log('   Run: createdb smart-collection-api');
       }
       
       if (error.message.includes('password authentication')) {
-        console.log('   💡 Check: PostgreSQL password authentication');
-        console.log('   💡 Try: Add password to connection string');
+        console.log('   Check: PostgreSQL password authentication');
+        console.log('   Try: Add password to connection string');
       }
       
       if (error.message.includes('timeout')) {
-        console.log('   💡 Check: PostgreSQL is running on port 5432');
+        console.log('   Check: PostgreSQL is running on port 5432');
       }
     }
     console.log('---');

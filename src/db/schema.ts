@@ -1,4 +1,3 @@
-
 import { pgTable, text, integer, serial, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
