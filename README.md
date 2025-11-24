@@ -40,24 +40,22 @@ CREATE TABLE collections (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
 
 CREATE TABLE collection_items (
     id SERIAL PRIMARY KEY,
-    collection_id INTEGER NOT NULL,
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
     item_id TEXT NOT NULL,
     note TEXT,
     created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
 
-# Create unique constraints
 CREATE UNIQUE INDEX user_collection_name_idx ON collections(user_id, name);
 CREATE UNIQUE INDEX collection_item_unique_idx ON collection_items(collection_id, item_id);
 
-# Create 5-item limit constraint
 CREATE OR REPLACE FUNCTION check_collection_item_limit()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -66,6 +64,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
+$$ LANGUAGE plpgsql;
 
 CREATE TRIGGER enforce_collection_item_limit
     BEFORE INSERT ON collection_items
